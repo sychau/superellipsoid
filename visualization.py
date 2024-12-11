@@ -1,5 +1,5 @@
 """ 
-Adopted from "Superquadrics Revisited: Learning 3D Shape Parsing beyond Cuboids" by Paschalidou et al.
+Adopted and modified from "Superquadrics Revisited: Learning 3D Shape Parsing beyond Cuboids" by Paschalidou et al.
 https://github.com/paschalidoud/superquadric_parsing/blob/master/scripts/visualization_utils.py
 """
 
@@ -54,6 +54,8 @@ def points_on_sq_surface(a1, a2, a3, e1, e2, R, t, Kx, Ky, n_samples=100):
 
     return x_tr, y_tr, z_tr, points_transformed
 
+# New functions below
+
 def _from_primitive_parms_to_mesh(translation, rotations, sizes, shapes, deformation,color):
     # Extract the parameters of the primitives
     a1, a2, a3 = sizes
@@ -85,7 +87,6 @@ def save_prediction_as_ply(prediction, output_path, prob_threshold):
 
     for m in range(M):
         if (prob[0][m] < prob_threshold):
-            print("skip ", m)
             continue
         color = random_colors[m]
         _mesh = _from_primitive_parms_to_mesh(

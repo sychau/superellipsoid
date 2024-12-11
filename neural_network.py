@@ -1,64 +1,23 @@
 """ 
-Adopted from "Superquadrics Revisited: Learning 3D Shape Parsing beyond Cuboids" by Paschalidou et al.
+Adopted and modified from "Superquadrics Revisited: Learning 3D Shape Parsing beyond Cuboids" by Paschalidou et al.
 https://github.com/paschalidoud/superquadric_parsing/blob/master/learnable_primitives/models.py
 """
 
-import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-from torchvision import models
 
 
 class NetworkParameters:
     def __init__(self, architecture, n_primitives=32,
-                 mu=0.0, sigma=0.001, add_gaussian_noise=False,
                  use_sq=False, make_dense=False,
                  use_deformations=False,
                  train_with_bernoulli=False):
         self.architecture = architecture
         self.n_primitives = n_primitives
         self.train_with_bernoulli = train_with_bernoulli
-        self.add_gaussian_noise = add_gaussian_noise
-        self.gaussian_noise_layer = get_gaussian_noise_layer(
-            self.add_gaussian_noise,
-            mu,
-            sigma
-        )
         self.use_sq = use_sq
         self.use_deformations = use_deformations
         self.make_dense = make_dense
-
-    @classmethod
-    def from_options(cls, argument_parser):
-        # Make Namespace to dictionary to be able to use it
-        args = vars(argument_parser)
-
-        architecture = args["architecture"]
-        n_primitives = args.get("n_primitives", 32)
-
-        add_gaussian_noise = args.get("add_gaussian_noise", False)
-        mu = args.get("mu", 0.0)
-        sigma = args.get("sigma", 0.001)
-
-        # By default train without learning Bernoulli priors
-        train_with_bernoulli = args.get("train_with_bernoulli", False)
-        use_sq = args.get("use_sq", False)
-        use_deformations = args.get("use_deformations", False)
-        make_dense = args.get("make_dense", False)
-
-        return cls(
-            architecture,
-            n_primitives=n_primitives,
-            mu=mu,
-            sigma=sigma,
-            add_gaussian_noise=add_gaussian_noise,
-            use_sq=use_sq,
-            use_deformations=use_deformations,
-            train_with_bernoulli=train_with_bernoulli,
-            make_dense=make_dense
-        )
 
     @property
     def network(self):
@@ -411,22 +370,6 @@ class GeometricPrimitive(nn.Module):
             shapes, deformations
         )
 
-
-class GaussianNoise(nn.Module):
-    def __init__(self, mu=0.0, sigma=0.01):
-        super(GaussianNoise, self).__init__()
-        # Mean of the distribution
-        self.mu = mu
-        # Standard deviation of the distribution
-        self.sigma = sigma
-
-    def forward(self, X):
-        if self.training and self.sigma != 0:
-            n = X.new_zeros(*X.size()).normal_(self.mu, self.sigma)
-            X = X + n
-        return X
-
-
 def train_on_batch(
     model,
     optimizer,
@@ -458,31 +401,3 @@ def train_on_batch(
         [x.data if hasattr(x, "data") else x for x in y_hat],
         debug_stats
     )
-
-
-def get_gaussian_noise_layer(add_gaussian_noise, mu=0.0, sigma=0.01):
-    if add_gaussian_noise:
-        return GaussianNoise(mu=mu, sigma=sigma)
-    else:
-        return GaussianNoise(mu=0.0, sigma=0.0)
-
-
-def optimizer_factory(args, model):
-    """Based on the input arguments create a suitable optimizer object
-    """
-    if args.probs_only:
-        params = model._primitive_layer._primitive_params["probs"].parameters()
-    else:
-        params = model.parameters()
-
-    if args.optimizer == "SGD":
-        return optim.SGD(
-            params,
-            lr=args.lr,
-            momentum=args.momentum
-        )
-    elif args.optimizer == "Adam":
-        return optim.Adam(
-            params,
-            lr=args.lr
-        )

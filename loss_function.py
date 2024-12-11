@@ -302,13 +302,13 @@ def euclidean_dual_loss(
     debug_stats["regularizer_terms"] = reg_values
     debug_stats["pcl_to_prim_loss"] = pcl_to_prim
     debug_stats["prim_to_pcl_loss"] = prim_to_pcl
-
     # Sum up the regularization terms
     # print("regularizers: ", reg_values)
     regs = sum(reg_values.values())
     w1 = loss_weights["pcl_to_prim_weight"]
     w2 = loss_weights["prim_to_pcl_weight"]
-    return w1 * pcl_to_prim + w2 * prim_to_pcl + regs, debug_stats
+    debug_stats["chamfer_loss"] = w1 * pcl_to_prim + w2 * prim_to_pcl
+    return 0 + regs, debug_stats
 
 
 def pcl_to_prim_loss(
@@ -519,3 +519,115 @@ def get_regularizer_weights(regularizers, regularizer_terms):
     }
 
     return reg_values
+
+def overlapping_loss(samples, prob, translation, rotation, sizes, shapes):
+    """
+    Calculate the overlapping loss for each superellipsoid primitive by measuring
+    how much it overlaps with other primitives using an implicit function.
+    
+    Parameters:
+    - prob: Tensor of shape (B, M, 1), representing the probability that a primitive exists (expectation).
+    - samples: Tensor of shape (B, M, S, 3), where B is the batch size, M is the number of primitives,
+               and S is the number of sample points.
+    - sizes: Tensor of shape (B, M, 3), representing the sizes (dimensions) of the superellipsoids.
+    - shapes: Tensor of shape (B, M, 2), containing shape parameters for each superellipsoid.
+    - translation: Tensor of shape (B, M, 3), containing the translation vectors for each primitive.
+    - rotation: Tensor of shape (B, M, 4), representing the rotation parameters for each primitive.
+    
+    Returns:
+    - overlapping_loss: Scalar value representing the total overlap loss for the batch.
+    """
+    
+    # Initialize loss variable
+    overlapping_loss = 0.0
+    
+    # Get batch size and number of primitives
+    B, M, _, _ = samples.shape  # Assuming samples are of shape (B, M, S, 3)
+
+    # Loop through each batch and pair of primitives
+    for b in range(B):  # Loop through each sample in the batch
+        for i in range(M):  # Loop through each primitive i
+            for j in range(i + 1, M):  # Loop through each primitive j (to avoid duplicate calculations)
+                
+                # Get the relevant parameters for primitives i and j
+                size_i, size_j = sizes[b, i], sizes[b, j]
+                shape_i, shape_j = shapes[b, i], shapes[b, j]
+                trans_i, trans_j = translation[b, i], translation[b, j]
+                rot_i, rot_j = rotation[b, i], rotation[b, j]
+                
+                # Compute the implicit functions (signed distance fields) for both primitives i and j
+                sdf_i = compute_implicit_function(samples[b, i], size_i, shape_i, trans_i, rot_i)
+                sdf_j = compute_implicit_function(samples[b, j], size_j, shape_j, trans_j, rot_j)
+                
+                # Calculate the overlap between the two primitives i and j
+                overlap_ij = compute_overlap(sdf_i, sdf_j)
+                
+                # Weight the overlap by the existence probabilities of both primitives (expectation)
+                weighted_overlap = prob[b, i] * prob[b, j] * overlap_ij
+                
+                # Add the weighted overlap to the total overlapping loss
+                overlapping_loss += weighted_overlap
+    
+    # Return the final loss (can be scaled or averaged as necessary)
+    return overlapping_loss
+
+def compute_implicit_function(points, size, shape, translation, rotation):
+    """
+    Computes the implicit function (signed distance function) for a superellipsoid.
+    
+    Parameters:
+    - points: A tensor of shape (S, 3) representing the points in 3D space.
+    - size: A vector of size (3,) representing the radii of the superellipsoid along x, y, and z axes.
+    - shape: A vector of size (2,) representing the shape parameters n1, n2 for the superellipsoid.
+    - translation: A vector of size (3,) representing the translation (position) of the superellipsoid.
+    - rotation: A quaternion or rotation matrix that rotates the superellipsoid.
+
+    Returns:
+    - sdf_values: A tensor of shape (S,) representing the signed distance of each point to the superellipsoid surface.
+    """
+
+
+    # Translate and rotate points
+    points_translated = points - translation  # Apply translation
+    
+    # Apply rotation (if quaternion, use a rotation matrix conversion)
+    # For simplicity, assume rotation is a 3x3 matrix
+    points_rotated = np.dot(points_translated, rotation.T)
+    
+    # Extract size and shape parameters
+    a, b, c = size
+    n1, n2 = shape
+    
+    # Compute the implicit function for each point
+    sdf_values = np.abs(points_rotated[:, 0]) / a
+    sdf_values = np.power(sdf_values, 2 / n1)
+    
+    sdf_values += np.abs(points_rotated[:, 1]) / b
+    sdf_values = np.power(sdf_values, 2 / n2)
+    
+    sdf_values += np.abs(points_rotated[:, 2]) / c
+    sdf_values = np.power(sdf_values, 2 / n3)
+    
+    sdf_values -= 1  # Subtract 1 to get the signed distance (inside/outside the superellipsoid)
+    
+    return sdf_values
+
+def compute_overlap(sdf_i, sdf_j):
+    """
+    Computes the overlap between two superellipsoids based on their signed distance functions (SDFs).
+    
+    Parameters:
+    - sdf_i: A tensor of signed distance values (S,) for superellipsoid i.
+    - sdf_j: A tensor of signed distance values (S,) for superellipsoid j.
+    
+    Returns:
+    - overlap: A scalar value representing the amount of overlap between the two superellipsoids.
+    """
+    
+    # Count how many points are inside both superellipsoids
+    overlap_points = np.sum((sdf_i < 0) & (sdf_j < 0))
+    
+    # The overlap can be normalized by the number of sample points
+    overlap = overlap_points / len(sdf_i)  # This gives a ratio of overlap
+    
+    return overlap

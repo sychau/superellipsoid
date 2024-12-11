@@ -1,3 +1,4 @@
+# This file is only for compiling the fast sampling cython file
 from setuptools import setup, Extension
 from Cython.Build import cythonize
 import numpy as np
